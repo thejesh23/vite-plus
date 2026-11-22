@@ -215,6 +215,15 @@ Low-priority managed shims live in `<DATA>/fallback-bin`, where `<DATA>` is the 
   curl -fsSL https://vite.plus | NPM_CONFIG_REGISTRY=https://registry.npmmirror.com bash
   ```
 
+#### `VP_LEGACY_INSTALLER_URL`
+
+- **Purpose**: URL of the fallback installer script. The bootstrap downloads it only when the selected Vite+ binary predates self-setup support and no `install-legacy.sh` (or `install-legacy.ps1` on Windows) sits beside the installer script.
+- **Default**: `https://viteplus.dev/install-legacy.sh` (`install-legacy.ps1` on Windows)
+- **Example**:
+  ```bash
+  curl -fsSL https://vite.plus | VP_LEGACY_INSTALLER_URL=file:///path/to/install-legacy.sh bash
+  ```
+
 #### `VP_NODE_MANAGER`
 
 - **Purpose**: Control Node.js version manager setup during installation.
@@ -455,6 +464,39 @@ Use Homebrew to [upgrade](/guide/upgrade#homebrew) or [remove](/guide/implode#ho
 `vp env doctor` identifies the Homebrew source, formula name, and binary path. It checks the `vp` command and the user shim directory on `PATH` separately. If only the shim directory is missing, follow its shell setup instructions to enable the shims.
 
 See the [official tap guide](/guide/homebrew) for registry configuration and migration instructions.
+
+## Network Hosts
+
+Vite+ and its installers download from a small set of hosts. On machines whose outbound traffic is limited to a firewall allowlist, permit the hosts for the features you use. Install-time hosts are only needed to run the installer, so their files can also be fetched once on another machine and copied over. The variables in [Installation Variables](#installation-variables) and [Runtime Variables](#runtime-variables) replace the registry and Node.js download hosts with your own mirror.
+
+### Install-time hosts
+
+| Host                           | Purpose                                                                                       | Needed                                                        | Override                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `vite.plus`                    | Serves `install.sh` and `install.ps1` for the one-line installer                              | First install, upgrades run through the script                | Fetch the script once and run a local copy from the repository            |
+| `setup.viteplus.dev`           | Serves the standalone Windows installer [`vp-setup.exe`](https://setup.viteplus.dev)          | First install on Windows without a shell pipeline             | Download it once and copy it in                                           |
+| `viteplus.dev`                 | Serves the legacy installer the bootstrap falls back to for Vite+ versions without self-setup | First install, only if falling back                           | [`VP_LEGACY_INSTALLER_URL`](#vp-legacy-installer-url) (accepts `file://`) |
+| `registry.npmjs.org`           | Resolves and downloads the global CLI package and bootstraps its pinned pnpm                  | Every install and `vp upgrade`                                | `NPM_CONFIG_REGISTRY`                                                     |
+| `nodejs.org`                   | Node.js glibc distributions and `index.json`                                                  | Installs and commands that download a managed Node.js (glibc) | `VP_NODE_DIST_MIRROR`                                                     |
+| `unofficial-builds.nodejs.org` | Node.js musl distributions                                                                    | Installs and commands that download a managed Node.js (musl)  | `VP_NODE_DIST_MIRROR`                                                     |
+
+[`VP_PR_VERSION`](#vp-pr-version) preview installs resolve through `registry-bridge.viteplus.dev` instead of the npm registry.
+
+### Runtime hosts
+
+| Host                                         | Purpose                                                                                                                                                                                        | Needed                                                  | Override                                                                                            |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `registry.npmjs.org`                         | Project dependencies (`vp install`, `vp add`), managed package-manager downloads (`vp env install`), `vp dlx`, npm-based `vp create` generators such as `create-vite@latest`, and `vp upgrade` | Whenever packages or tool versions are fetched          | `NPM_CONFIG_REGISTRY` and `.npmrc`                                                                  |
+| `nodejs.org`, `unofficial-builds.nodejs.org` | Managed Node.js versions (`vp env install`, `vp env default`) and the version index behind `vp env list-remote`                                                                                | Whenever a managed Node.js version is missing or listed | `VP_NODE_DIST_MIRROR`                                                                               |
+| `github.com`                                 | GitHub templates for `vp create`, including the built-in `vite:library` template, downloaded through `degit`                                                                                   | Only `vp create` with GitHub templates                  | None. Template repositories are user-supplied, so an allowlist can only cover the templates you use |
+
+Bingo-based generators may make additional GitHub API requests. For workspace-registered Bingo templates, `vp create` appends `--skip-requests` automatically; generators from other sources can make their own requests.
+
+Node.js downloads are verified against checksums and, from the official hosts, release signatures. The release keys are bundled with the CLI, so verification never contacts a keyserver.
+
+The [Homebrew tap](#homebrew) installs the `vp` binary from GitHub Releases instead of `vite.plus` and `registry.npmjs.org`. The first `vp` command still downloads the CLI's JavaScript dependencies from the npm registry.
+
+For machines without any public internet access, point [`NPM_CONFIG_REGISTRY`](#npm-config-registry) and [`VP_NODE_DIST_MIRROR`](#vp-node-dist-mirror) at a private mirror. See the [Node.js mirror guide](/guide/env#custom-node-js-mirror) for the layout a mirror must keep.
 
 ## Use It Without a Local Package
 

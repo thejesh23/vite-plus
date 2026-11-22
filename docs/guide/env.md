@@ -323,6 +323,8 @@ VP_NODE_DIST_MIRROR=https://my-mirror.example.com/nodejs/dist vp env default lts
 echo 'export VP_NODE_DIST_MIRROR=https://my-mirror.example.com/nodejs/dist' >> ~/.zshrc
 ```
 
+For the complete list of hosts Vite+ contacts and their overrides, see [Network Hosts](/guide/global-cli#network-hosts).
+
 ## Node.js Signature Verification
 
 When installing Node.js from the official `nodejs.org` distribution, Vite+ downloads the PGP-signed `SHASUMS256.txt.asc` and verifies it against the bundled Node.js release keys before trusting any checksum. This protects against a tampered `SHASUMS256.txt` paired with a matching malicious archive. The SHA-256 checksum of the downloaded archive is always verified afterward.
