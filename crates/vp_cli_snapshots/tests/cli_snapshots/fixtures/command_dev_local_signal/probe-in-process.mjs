@@ -131,6 +131,14 @@ async function run(setting) {
   }
 }
 
-for (const setting of settings) {
-  await run(setting);
+try {
+  for (const setting of settings) {
+    await run(setting);
+  }
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
+  // The runner starts the probe in its own group. When Vite runs as a child
+  // again, SIGKILL to the launcher leaves Vite running, so stop the group.
+  process.kill(-process.pid, 'SIGKILL');
 }
