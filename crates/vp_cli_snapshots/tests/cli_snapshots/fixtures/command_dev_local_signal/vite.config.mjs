@@ -6,7 +6,10 @@ export default {
       name: 'report-listening-port',
       configureServer(server) {
         server.httpServer.once('listening', () => {
-          console.log(`listening ${server.httpServer.address().port} ${process.pid}`);
+          const { port } = server.httpServer.address();
+          console.log(`listening ${port} ${process.pid}`);
+          // A caller that forks the launcher keeps its IPC channel.
+          process.send?.({ listening: port, pid: process.pid });
         });
       },
     },

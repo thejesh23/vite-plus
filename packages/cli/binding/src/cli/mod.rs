@@ -20,8 +20,8 @@ pub(crate) use execution::resolve_and_capture_output;
 // Re-exports for lib.rs and check/mod.rs
 pub use resolver::SubcommandResolver;
 pub use types::{
-    BoxedResolverFn, CliOptions, ResolveCommandResult, SynthesizableSubcommand, ToolchainArgs,
-    ViteConfigResolverFn,
+    BoxedResolverFn, CliOptions, InProcessCommand, InProcessSlot, ResolveCommandResult,
+    SynthesizableSubcommand, ToolchainArgs, ViteConfigResolverFn,
 };
 pub(crate) use types::{CapturedCommandOutput, EnvMap};
 use vp_error::Error;
@@ -80,7 +80,7 @@ async fn execute_direct_subcommand(
     };
     let workspace_path: Arc<AbsolutePath> = workspace_root.path.into();
 
-    let exec_dev = options.as_ref().is_some_and(|options| options.exec_dev);
+    let in_process_dev = options.as_ref().and_then(|options| options.in_process_dev.clone());
     let resolver = if let Some(options) = options {
         SubcommandResolver::new(Arc::clone(&workspace_path)).with_cli_options(options)
     } else {
@@ -155,7 +155,7 @@ async fn execute_direct_subcommand(
                 )
                 .await?
             } else {
-                resolve_and_execute(&resolver, other, &envs, cwd, exec_dev).await?
+                resolve_and_execute(&resolver, other, &envs, cwd, in_process_dev.as_ref()).await?
             }
         }
     };

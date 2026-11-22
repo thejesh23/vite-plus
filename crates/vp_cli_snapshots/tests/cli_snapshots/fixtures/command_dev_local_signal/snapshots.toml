@@ -2,7 +2,7 @@
 name = "command_dev_local_signal"
 vp = "local"
 skip-platforms = ["windows"]
-comment = "SIGTERM sent to the project-local vp dev PID stops the listening Vite server."
+comment = "Project-local vp dev runs Vite in the launcher process, so SIGTERM to that PID stops the listening server."
 steps = [{ argv = ["node", "probe.mjs"], tty = false, timeout = 25000 }]
 
 [[case]]
@@ -13,15 +13,8 @@ comment = "A Node Worker runs project-local vp dev without replacing its host pr
 steps = [{ argv = ["node", "probe.mjs", "--worker"], tty = false, timeout = 25000 }]
 
 [[case]]
-name = "command_dev_local_signal_cpu_prof"
+name = "command_dev_local_signal_in_process"
 vp = "local"
 skip-platforms = ["windows"]
-comment = "A launcher started with a Node.js flag such as --cpu-prof keeps Vite as a child and writes its profile."
-steps = [{ argv = ["node", "probe.mjs", "--cpu-prof"], tty = false, timeout = 25000 }]
-
-[[case]]
-name = "command_dev_local_signal_diagnostics_env"
-vp = "local"
-skip-platforms = ["windows"]
-comment = "NODE_OPTIONS=--inspect, NODE_OPTIONS=--cpu-prof, and NODE_V8_COVERAGE keep Vite as a child of the launcher."
-steps = [{ argv = ["node", "probe-diagnostics.mjs"], tty = false, timeout = 40000 }]
+comment = "Node.js options, a preload, --debug, and an IPC channel of the launcher apply once, to Vite in the launcher process."
+steps = [{ argv = ["node", "probe-in-process.mjs"], tty = false, timeout = 60000 }]

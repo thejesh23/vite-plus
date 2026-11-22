@@ -3657,8 +3657,11 @@ export interface CliOptions {
   cwd?: string;
   /** Whether the user supplied the global `-C` option. */
   explicitChdir?: boolean;
-  /** Allow the local dev entry point to replace the launcher on Unix. */
-  execDev?: boolean;
+  /**
+   * Return the `vp dev` command in `RunResult.devCommand` instead of
+   * starting it, so that the launcher runs Vite in its own process.
+   */
+  devInProcess?: boolean;
   /** CLI arguments (should be process.argv.slice(2) from JavaScript) */
   args?: Array<string>;
   /**
@@ -3734,6 +3737,20 @@ export interface DetectWorkspaceResult {
   root?: string;
 }
 
+/** A `node <entry> ...` command that the launcher runs in its own process. */
+export interface DevCommand {
+  /** The JavaScript entry point to import. */
+  entry: string;
+  /** The arguments after the entry point. */
+  args: Array<string>;
+  /** The working directory. */
+  cwd: string;
+  /** Environment variables that differ from the launcher's environment. */
+  setEnv: Array<EnvVar>;
+  /** Environment variables to remove from the launcher's environment. */
+  removeEnv: Array<string>;
+}
+
 /** Build documentation links with the same compiled origin as the native CLI. */
 export declare function documentationUrl(path: string): string;
 
@@ -3807,6 +3824,12 @@ export interface DownloadPackageManagerResult {
 
 /** Re-enable blocking stdio after Node.js has initialized its lazy standard streams. */
 export declare function ensureBlockingStdio(): void;
+
+/** One environment variable. */
+export interface EnvVar {
+  name: string;
+  value: string;
+}
 
 /**
  * Find the monorepo root containing `cwd` with the same rules as `vp run` and `vp install`.
@@ -4134,7 +4157,7 @@ export declare function rewriteScripts(scriptsJson: string, rulesYaml: string): 
  * from vt, while allowing the NAPI async context to continue running
  * and process JavaScript callbacks (via ThreadsafeFunction).
  */
-export declare function run(options: CliOptions): Promise<number>;
+export declare function run(options: CliOptions): Promise<RunResult>;
 
 /**
  * Run a command with fspy tracking, callable from JavaScript.
@@ -4204,6 +4227,14 @@ export interface RunCommandResult {
   exitCode: number;
   /** Map of relative paths to their access modes */
   pathAccesses: Record<string, PathAccess>;
+}
+
+/** The result of [`run`]. */
+export interface RunResult {
+  /** The exit code. It is 0 when `devCommand` is set. */
+  exitCode: number;
+  /** The `vp dev` command for the launcher to run in its own process. */
+  devCommand?: DevCommand;
 }
 
 /**

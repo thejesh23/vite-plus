@@ -10,12 +10,11 @@
  * If no local installation is found, this global dist/bin.js is used as fallback.
  */
 
-import module from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 
-import { ensureBlockingStdio, run } from '../binding/index.js';
+import { type DevCommand, ensureBlockingStdio, run } from '../binding/index.js';
 import { maybePrintCommandHelp } from './help.ts';
 import { applyToolInitConfigToViteConfig, inspectInitCommand } from './init-config.ts';
 import { doc } from './resolve-doc.ts';
@@ -24,7 +23,6 @@ import { lint } from './resolve-lint.ts';
 import { pack } from './resolve-pack.ts';
 import { test } from './resolve-test.ts';
 import { vite } from './resolve-vite.ts';
-import { launcherHasDiagnostics } from './utils/launcher-diagnostics.ts';
 import { accent, errorMsg, log } from './utils/terminal.ts';
 import { setUserAgent } from './utils/user-agent.ts';
 
@@ -66,6 +64,23 @@ function getErrorMessage(err: unknown): string {
   }
 
   return String(err);
+}
+
+/**
+ * Run the dev server command in this process, as `vite` would run. The
+ * launcher's process ID is then the dev server's, so a signal to it reaches
+ * Vite, and Node.js options such as `--inspect` or `--cpu-prof` cover Vite.
+ */
+async function runInProcess(command: DevCommand): Promise<void> {
+  for (const name of command.removeEnv) {
+    delete process.env[name];
+  }
+  for (const { name, value } of command.setEnv) {
+    process.env[name] = value;
+  }
+  process.chdir(command.cwd);
+  process.argv = [process.execPath, command.entry, ...command.args];
+  await import(pathToFileURL(command.entry).href);
 }
 
 // Parse command line arguments
@@ -168,22 +183,7 @@ if (maybePrintCommandHelp(args)) {
       process.exit(0);
     }
 
-    // Limit process replacement to the standalone package launcher. Keep Vite
-    // as a child when Node.js ties a debugger session or exit-time output,
-    // such as a CPU profile, to the launcher.
-    const execDev =
-      command === 'dev' &&
-      isMainThread &&
-      process.platform !== 'win32' &&
-      path.basename(process.argv[1] ?? '') === 'vp' &&
-      process.send === undefined &&
-      !(await launcherHasDiagnostics());
-    if (execDev) {
-      // Save the launcher's compile cache before handing its process to Vite.
-      module.flushCompileCache?.();
-    }
-
-    const exitCode = await run({
+    const { exitCode, devCommand } = await run({
       nodeExecPath: process.execPath,
       lint,
       pack,
@@ -194,8 +194,8 @@ if (maybePrintCommandHelp(args)) {
       toolchainManifestPath: path.join(cliDistDir, 'toolchain.json'),
       vitePlusPackagePath,
       // Only task/config-metadata commands need this resolver. Importing it
-      // eagerly also loads Vitest and Vite in the parent of `vp dev`, before
-      // the separate Vite process even starts.
+      // eagerly also loads Vitest and Vite before `vp dev` starts Vite in
+      // this process.
       resolveUniversalViteConfig: async (err, cwd) => {
         const { resolveUniversalViteConfig } = await import('./resolve-vite-config.js');
         const config = await resolveUniversalViteConfig(err, cwd);
@@ -205,41 +205,48 @@ if (maybePrintCommandHelp(args)) {
       },
       nodeVersion: process.version,
       explicitChdir,
-      execDev,
+      // A Worker cannot change the working directory, so it keeps Vite in a
+      // child process.
+      devInProcess: command === 'dev' && isMainThread,
       args: rustCliArgs,
     });
 
-    let finalExitCode = exitCode;
-    if (exitCode === 0) {
-      try {
-        const result = await applyToolInitConfigToViteConfig(command, args.slice(1));
-        if (
-          result.handled &&
-          result.action === 'added' &&
-          result.configKey &&
-          result.viteConfigPath
-        ) {
-          log(
-            `Added '${accent(result.configKey)}' to '${accent(path.basename(result.viteConfigPath))}'.`,
-          );
+    if (devCommand) {
+      // Vite keeps this process running and exits by itself.
+      await runInProcess(devCommand);
+    } else {
+      let finalExitCode = exitCode;
+      if (exitCode === 0) {
+        try {
+          const result = await applyToolInitConfigToViteConfig(command, args.slice(1));
+          if (
+            result.handled &&
+            result.action === 'added' &&
+            result.configKey &&
+            result.viteConfigPath
+          ) {
+            log(
+              `Added '${accent(result.configKey)}' to '${accent(path.basename(result.viteConfigPath))}'.`,
+            );
+          }
+          if (
+            result.handled &&
+            result.action === 'skipped-existing' &&
+            result.configKey &&
+            result.viteConfigPath
+          ) {
+            log(
+              `Skipped initialization: '${accent(result.configKey)}' already exists in '${accent(path.basename(result.viteConfigPath))}'.`,
+            );
+          }
+        } catch (err) {
+          console.error('[Vite+] Failed to initialize config in vite.config.ts:', err);
+          finalExitCode = 1;
         }
-        if (
-          result.handled &&
-          result.action === 'skipped-existing' &&
-          result.configKey &&
-          result.viteConfigPath
-        ) {
-          log(
-            `Skipped initialization: '${accent(result.configKey)}' already exists in '${accent(path.basename(result.viteConfigPath))}'.`,
-          );
-        }
-      } catch (err) {
-        console.error('[Vite+] Failed to initialize config in vite.config.ts:', err);
-        finalExitCode = 1;
       }
-    }
 
-    process.exit(finalExitCode);
+      process.exit(finalExitCode);
+    }
   } catch (err) {
     errorMsg(getErrorMessage(err));
     process.exit(1);

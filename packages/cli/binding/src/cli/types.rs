@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vt::{Command, ExitStatus, config::user::UserCacheConfig, plan_request::SyntheticPlanRequest};
 use vt_casefold::EnvName;
-use vt_path::AbsolutePath;
+use vt_path::{AbsolutePath, AbsolutePathBuf};
 use vt_str::Str;
 
 /// Environment variables for a spawned command. Names compare by the platform's
@@ -171,7 +171,9 @@ pub type ViteConfigResolverFn = Arc<
 /// CLI options containing JavaScript resolver functions (using boxed futures for simplicity)
 pub struct CliOptions {
     pub node_exec_path: Arc<OsStr>,
-    pub exec_dev: bool,
+    /// When set, `vp dev` stores its command here and starts no process, so
+    /// the launcher can run Vite in its own process.
+    pub in_process_dev: Option<InProcessSlot>,
     pub lint: BoxedResolverFn,
     pub fmt: BoxedResolverFn,
     pub vite: BoxedResolverFn,
@@ -185,6 +187,23 @@ pub struct CliOptions {
     /// lifecycle env user agent.
     pub node_version: Option<String>,
 }
+
+/// A command that the launcher runs in its own process. The entry point is a
+/// JavaScript file for the launcher's Node.js.
+#[derive(Debug)]
+pub struct InProcessCommand {
+    pub entry: Str,
+    /// The arguments after the entry point.
+    pub args: Vec<Str>,
+    pub cwd: AbsolutePathBuf,
+    /// Environment variables that differ from the launcher's environment.
+    pub set_env: Vec<(Str, Str)>,
+    /// Environment variables to remove from the launcher's environment.
+    pub remove_env: Vec<Str>,
+}
+
+/// Receives an [`InProcessCommand`] in place of a child process.
+pub type InProcessSlot = Arc<std::sync::Mutex<Option<InProcessCommand>>>;
 
 /// A resolved subcommand ready for execution.
 pub(super) struct ResolvedSubcommand {
