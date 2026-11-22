@@ -121,16 +121,7 @@ pub struct DevCommand {
     /// The working directory.
     pub cwd: String,
     /// Environment variables that differ from the launcher's environment.
-    pub set_env: Vec<EnvVar>,
-    /// Environment variables to remove from the launcher's environment.
-    pub remove_env: Vec<String>,
-}
-
-/// One environment variable.
-#[napi(object, object_from_js = false)]
-pub struct EnvVar {
-    pub name: String,
-    pub value: String,
+    pub env: HashMap<String, String>,
 }
 
 impl From<cli::InProcessCommand> for DevCommand {
@@ -139,12 +130,11 @@ impl From<cli::InProcessCommand> for DevCommand {
             entry: command.entry.to_string(),
             args: command.args.iter().map(ToString::to_string).collect(),
             cwd: command.cwd.as_path().to_string_lossy().into_owned(),
-            set_env: command
-                .set_env
+            env: command
+                .env
                 .into_iter()
-                .map(|(name, value)| EnvVar { name: name.to_string(), value: value.to_string() })
+                .map(|(name, value)| (name.to_string(), value.to_string()))
                 .collect(),
-            remove_env: command.remove_env.iter().map(ToString::to_string).collect(),
         }
     }
 }
@@ -261,9 +251,7 @@ pub async fn run(options: CliOptions) -> Result<RunResult> {
     let args = options.args;
     let node_version = options.node_version;
     let explicit_chdir = options.explicit_chdir.unwrap_or(false);
-    let in_process_dev =
-        options.dev_in_process.unwrap_or(false).then(crate::cli::InProcessSlot::default);
-    let thread_in_process_dev = in_process_dev.clone();
+    let in_process_dev = options.dev_in_process.unwrap_or(false);
     let toolchain_manifest_path = options.toolchain_manifest_path;
     let vite_plus_package_path = options.vite_plus_package_path;
     let node_exec_path = Arc::from(OsStr::new(&options.node_exec_path));
@@ -290,7 +278,7 @@ pub async fn run(options: CliOptions) -> Result<RunResult> {
                 resolve_universal_vite_config_tsf,
             ),
             node_version,
-            in_process_dev: thread_in_process_dev,
+            in_process_dev,
         };
 
         // Create a new single-threaded runtime for non-Send futures
@@ -315,11 +303,11 @@ pub async fn run(options: CliOptions) -> Result<RunResult> {
     tracing::debug!("Result: {result:?}");
 
     match result {
-        Ok(exit_status) => {
-            let dev_command = in_process_dev
-                .and_then(|slot| slot.lock().ok().and_then(|mut stored| stored.take()))
-                .map(DevCommand::from);
-            Ok(RunResult { exit_code: exit_status.0.into(), dev_command })
+        Ok(cli::Outcome::Exit(status)) => {
+            Ok(RunResult { exit_code: status.0.into(), dev_command: None })
+        }
+        Ok(cli::Outcome::InProcess(command)) => {
+            Ok(RunResult { exit_code: 0, dev_command: Some(command.into()) })
         }
         Err(e) => {
             tracing::error!("Rust error: {:?}", e);

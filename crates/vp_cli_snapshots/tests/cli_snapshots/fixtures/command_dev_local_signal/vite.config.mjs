@@ -9,7 +9,7 @@ export default {
           const { port } = server.httpServer.address();
           console.log(`listening ${port} ${process.pid}`);
           // A caller that forks the launcher keeps its IPC channel.
-          process.send?.({ listening: port, pid: process.pid });
+          process.send?.({ pid: process.pid });
         });
       },
     },

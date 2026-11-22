@@ -72,14 +72,19 @@ function getErrorMessage(err: unknown): string {
  * Vite, and Node.js options such as `--inspect` or `--cpu-prof` cover Vite.
  */
 async function runInProcess(command: DevCommand): Promise<void> {
-  for (const name of command.removeEnv) {
-    delete process.env[name];
-  }
-  for (const { name, value } of command.setEnv) {
-    process.env[name] = value;
-  }
+  Object.assign(process.env, command.env);
   process.chdir(command.cwd);
   process.argv = [process.execPath, command.entry, ...command.args];
+  // Vite writes through this process's stdio. Let pipe writes queue, as they
+  // do when Vite opens its own stdio, so a slow reader cannot stall the server.
+  if (process.platform !== 'win32') {
+    for (const stream of [process.stdout, process.stderr]) {
+      if (!stream.isTTY) {
+        /* oxlint-disable-next-line no-underscore-dangle -- Node.js has no public API for this */
+        (stream as StdioStream)._handle?.setBlocking?.(false);
+      }
+    }
+  }
   await import(pathToFileURL(command.entry).href);
 }
 
@@ -206,45 +211,45 @@ if (maybePrintCommandHelp(args)) {
       nodeVersion: process.version,
       explicitChdir,
       // A Worker cannot change the working directory, so it keeps Vite in a
-      // child process.
-      devInProcess: command === 'dev' && isMainThread,
+      // child process. Rust decides which command can run in this process.
+      devInProcess: isMainThread,
       args: rustCliArgs,
     });
+
+    let finalExitCode = exitCode;
+    if (exitCode === 0) {
+      try {
+        const result = await applyToolInitConfigToViteConfig(command, args.slice(1));
+        if (
+          result.handled &&
+          result.action === 'added' &&
+          result.configKey &&
+          result.viteConfigPath
+        ) {
+          log(
+            `Added '${accent(result.configKey)}' to '${accent(path.basename(result.viteConfigPath))}'.`,
+          );
+        }
+        if (
+          result.handled &&
+          result.action === 'skipped-existing' &&
+          result.configKey &&
+          result.viteConfigPath
+        ) {
+          log(
+            `Skipped initialization: '${accent(result.configKey)}' already exists in '${accent(path.basename(result.viteConfigPath))}'.`,
+          );
+        }
+      } catch (err) {
+        console.error('[Vite+] Failed to initialize config in vite.config.ts:', err);
+        finalExitCode = 1;
+      }
+    }
 
     if (devCommand) {
       // Vite keeps this process running and exits by itself.
       await runInProcess(devCommand);
     } else {
-      let finalExitCode = exitCode;
-      if (exitCode === 0) {
-        try {
-          const result = await applyToolInitConfigToViteConfig(command, args.slice(1));
-          if (
-            result.handled &&
-            result.action === 'added' &&
-            result.configKey &&
-            result.viteConfigPath
-          ) {
-            log(
-              `Added '${accent(result.configKey)}' to '${accent(path.basename(result.viteConfigPath))}'.`,
-            );
-          }
-          if (
-            result.handled &&
-            result.action === 'skipped-existing' &&
-            result.configKey &&
-            result.viteConfigPath
-          ) {
-            log(
-              `Skipped initialization: '${accent(result.configKey)}' already exists in '${accent(path.basename(result.viteConfigPath))}'.`,
-            );
-          }
-        } catch (err) {
-          console.error('[Vite+] Failed to initialize config in vite.config.ts:', err);
-          finalExitCode = 1;
-        }
-      }
-
       process.exit(finalExitCode);
     }
   } catch (err) {

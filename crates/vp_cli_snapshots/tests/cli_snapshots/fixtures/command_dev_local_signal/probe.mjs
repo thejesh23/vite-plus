@@ -4,21 +4,20 @@ import { once } from 'node:events';
 import { connect } from 'node:net';
 import { createInterface } from 'node:readline';
 
+import { failAndStopGroup, parseListening } from './helpers.mjs';
+
 const workerMode = process.argv[2] === '--worker';
 
 async function listenerInfo(stdout, launchPid) {
   let listener;
   for await (const line of createInterface({ input: stdout })) {
-    const match = /^listening (\d+) (\d+)$/.exec(line);
-    if (match) {
-      listener = { port: Number(match[1]), pid: Number(match[2]) };
-      if (!workerMode) {
-        assert.equal(listener.pid, launchPid, 'Vite runs in the launcher process');
-        return listener;
-      }
-      assert.notEqual(listener.pid, launchPid, 'Vite replaced the Worker host');
+    listener = parseListening(line) ?? listener;
+    if (listener && !workerMode) {
+      assert.equal(listener.pid, launchPid, 'Vite runs in the launcher process');
+      return listener;
     }
     if (listener && line === 'worker host alive') {
+      assert.notEqual(listener.pid, launchPid, 'Vite replaced the Worker host');
       return listener;
     }
   }
@@ -60,12 +59,5 @@ try {
   const target = workerMode ? 'Vite child' : 'launch PID';
   console.log(`SIGTERM to the ${target} closed the port with exit code 143`);
 } catch (error) {
-  console.error(error);
-  process.exitCode = 1;
-} finally {
-  if (process.exitCode === 1) {
-    // The runner starts the probe in its own group. Stop its descendants
-    // before an early failure can leave the runner waiting for their pipes.
-    process.kill(-process.pid, 'SIGKILL');
-  }
+  failAndStopGroup(error);
 }

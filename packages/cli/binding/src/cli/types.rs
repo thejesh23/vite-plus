@@ -171,9 +171,9 @@ pub type ViteConfigResolverFn = Arc<
 /// CLI options containing JavaScript resolver functions (using boxed futures for simplicity)
 pub struct CliOptions {
     pub node_exec_path: Arc<OsStr>,
-    /// When set, `vp dev` stores its command here and starts no process, so
-    /// the launcher can run Vite in its own process.
-    pub in_process_dev: Option<InProcessSlot>,
+    /// When set, `vp dev` returns [`Outcome::InProcess`] and starts no
+    /// process, so the launcher can run Vite in its own process.
+    pub in_process_dev: bool,
     pub lint: BoxedResolverFn,
     pub fmt: BoxedResolverFn,
     pub vite: BoxedResolverFn,
@@ -197,13 +197,15 @@ pub struct InProcessCommand {
     pub args: Vec<Str>,
     pub cwd: AbsolutePathBuf,
     /// Environment variables that differ from the launcher's environment.
-    pub set_env: Vec<(Str, Str)>,
-    /// Environment variables to remove from the launcher's environment.
-    pub remove_env: Vec<Str>,
+    pub env: Vec<(Str, Str)>,
 }
 
-/// Receives an [`InProcessCommand`] in place of a child process.
-pub type InProcessSlot = Arc<std::sync::Mutex<Option<InProcessCommand>>>;
+/// What a command did: it ran and exited, or it is for the launcher to run.
+#[derive(Debug)]
+pub enum Outcome {
+    Exit(ExitStatus),
+    InProcess(InProcessCommand),
+}
 
 /// A resolved subcommand ready for execution.
 pub(super) struct ResolvedSubcommand {

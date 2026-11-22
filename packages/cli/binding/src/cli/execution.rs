@@ -2,14 +2,13 @@ use std::{borrow::Cow, process::Stdio, sync::Arc};
 
 use vp_error::Error;
 use vt::ExitStatus;
-use vt_casefold::EnvName;
 use vt_path::AbsolutePathBuf;
 use vt_str::Str;
 
 use super::{
     resolver::SubcommandResolver,
     types::{
-        CapturedCommandOutput, EnvMap, InProcessCommand, InProcessSlot, ResolvedSubcommand,
+        CapturedCommandOutput, EnvMap, InProcessCommand, Outcome, ResolvedSubcommand,
         SynthesizableSubcommand, exit_status_from,
     },
 };
@@ -47,58 +46,43 @@ fn build_resolved_command(
 /// Describe a resolved `node <entry> ...` command for the launcher to run in
 /// its own process. Returns `None` when a name or value is not UTF-8, so the
 /// caller starts a child process instead.
+///
+/// The resolved environment only adds to the launcher's environment, so the
+/// command carries the variables that differ and never removes one.
 fn in_process_command(
     resolved: &ResolvedSubcommand,
     cwd: &AbsolutePathBuf,
 ) -> Option<InProcessCommand> {
     let (entry, args) = resolved.args.split_first()?;
-    let current: EnvMap = std::env::vars_os()
-        .map(|(name, value)| {
-            (EnvName::new(Arc::from(name.as_os_str())), Arc::from(value.as_os_str()))
-        })
-        .collect();
-    let mut set_env = Vec::new();
+    let mut env = Vec::new();
     for (name, value) in resolved.envs.iter() {
-        if current.get(name) != Some(value) {
-            set_env.push((Str::from(name.inner().to_str()?), Str::from(value.to_str()?)));
+        if std::env::var_os(name.inner()).as_deref() != Some(&**value) {
+            env.push((Str::from(name.inner().to_str()?), Str::from(value.to_str()?)));
         }
     }
-    let remove_env = current
-        .keys()
-        .filter(|name| !resolved.envs.contains_key(*name))
-        .map(|name| name.inner().to_str().map(Str::from))
-        .collect::<Option<Vec<_>>>()?;
-    Some(InProcessCommand {
-        entry: entry.clone(),
-        args: args.to_vec(),
-        cwd: cwd.clone(),
-        set_env,
-        remove_env,
-    })
+    Some(InProcessCommand { entry: entry.clone(), args: args.to_vec(), cwd: cwd.clone(), env })
 }
 
-/// Resolve a single subcommand and execute it, returning its exit status.
+/// Resolve a single subcommand and execute it.
 ///
-/// With `in_process_dev`, `vp dev` stores its command there and starts no
-/// process. The dev command runs `node <vite.js> dev`, and the launcher is
+/// With `in_process_dev`, `vp dev` returns [`Outcome::InProcess`] and starts
+/// no process. The dev command runs `node <vite.js> dev`, and the launcher is
 /// already that Node.js.
 pub(super) async fn resolve_and_execute(
     resolver: &SubcommandResolver,
     subcommand: SynthesizableSubcommand,
     envs: &Arc<EnvMap>,
     cwd: &AbsolutePathBuf,
-    in_process_dev: Option<&InProcessSlot>,
-) -> Result<ExitStatus, Error> {
+    in_process_dev: bool,
+) -> Result<Outcome, Error> {
     let is_dev = matches!(subcommand, SynthesizableSubcommand::Dev { .. });
     let is_interactive = is_dev || matches!(subcommand, SynthesizableSubcommand::Preview { .. });
     let resolved = resolver.resolve(subcommand, envs, cwd).await.map_err(Error::Anyhow)?;
     if is_dev
-        && let Some(slot) = in_process_dev
+        && in_process_dev
         && let Some(command) = in_process_command(&resolved, cwd)
-        && let Ok(mut stored) = slot.lock()
     {
-        *stored = Some(command);
-        return Ok(ExitStatus::SUCCESS);
+        return Ok(Outcome::InProcess(command));
     }
     let mut cmd = build_resolved_command(&resolved, cwd)?;
 
@@ -109,7 +93,7 @@ pub(super) async fn resolve_and_execute(
         let mut child = cmd.spawn().map_err(|e| Error::Anyhow(e.into()))?;
         child.wait().await.map_err(|e| Error::Anyhow(e.into()))?
     };
-    Ok(exit_status_from(status))
+    Ok(Outcome::Exit(exit_status_from(status)))
 }
 
 pub(super) enum FilterStream {

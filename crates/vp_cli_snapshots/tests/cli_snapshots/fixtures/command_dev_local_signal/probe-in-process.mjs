@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import { fork, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+
+import { failAndStopGroup, localLauncher, parseListening } from './helpers.mjs';
 
 // `vp dev` runs Vite in the launcher process, so each Node.js option, preload,
 // and IPC channel of the launcher applies to Vite once, as when Vite runs directly.
-const launcher = process.env.PATH.split(delimiter)
-  .map((directory) => resolve(directory, 'vp'))
-  .find(existsSync);
-assert.ok(launcher, 'expected the project-local vp launcher on PATH');
+const launcher = localLauncher();
 const devArgs = ['dev', '--host', '127.0.0.1', '--port', '0'];
 
 function withNodeOptions(value) {
@@ -85,9 +84,9 @@ const settings = [
 
 async function vitePid(stdout) {
   for await (const line of createInterface({ input: stdout })) {
-    const match = /^listening \d+ (\d+)$/.exec(line);
-    if (match) {
-      return Number(match[1]);
+    const listener = parseListening(line);
+    if (listener) {
+      return listener.pid;
     }
   }
   assert.fail('Vite did not start listening');
@@ -121,12 +120,8 @@ async function run(setting) {
     setting.check({ dir, pid, stderr, messages });
     console.log(`${setting.name}: applied once, to Vite in the launch PID`);
   } catch (error) {
-    process.stderr.write(`${setting.name} failed. stderr:\n${stderr}\n`);
-    throw error;
+    throw new Error(`${setting.name} failed. Launcher stderr:\n${stderr}`, { cause: error });
   } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL');
-    }
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -136,9 +131,5 @@ try {
     await run(setting);
   }
 } catch (error) {
-  console.error(error);
-  process.exitCode = 1;
-  // The runner starts the probe in its own group. When Vite runs as a child
-  // again, SIGKILL to the launcher leaves Vite running, so stop the group.
-  process.kill(-process.pid, 'SIGKILL');
+  failAndStopGroup(error);
 }

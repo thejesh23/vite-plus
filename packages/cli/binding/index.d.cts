@@ -3746,9 +3746,7 @@ export interface DevCommand {
   /** The working directory. */
   cwd: string;
   /** Environment variables that differ from the launcher's environment. */
-  setEnv: Array<EnvVar>;
-  /** Environment variables to remove from the launcher's environment. */
-  removeEnv: Array<string>;
+  env: Record<string, string>;
 }
 
 /** Build documentation links with the same compiled origin as the native CLI. */
@@ -3824,12 +3822,6 @@ export interface DownloadPackageManagerResult {
 
 /** Re-enable blocking stdio after Node.js has initialized its lazy standard streams. */
 export declare function ensureBlockingStdio(): void;
-
-/** One environment variable. */
-export interface EnvVar {
-  name: string;
-  value: string;
-}
 
 /**
  * Find the monorepo root containing `cwd` with the same rules as `vp run` and `vp install`.
