@@ -2,15 +2,14 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { connect } from 'node:net';
-import { createInterface } from 'node:readline';
 
-import { failAndStopGroup, parseListening } from './helpers.mjs';
+import { failAndStopGroup, linesWithin, parseListening } from './helpers.mjs';
 
 const workerMode = process.argv[2] === '--worker';
 
 async function listenerInfo(stdout, launchPid) {
   let listener;
-  for await (const line of createInterface({ input: stdout })) {
+  for await (const line of linesWithin(stdout)) {
     listener = parseListening(line) ?? listener;
     if (listener && !workerMode) {
       assert.equal(listener.pid, launchPid, 'Vite runs in the launcher process');

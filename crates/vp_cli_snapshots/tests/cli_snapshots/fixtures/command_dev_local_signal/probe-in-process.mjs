@@ -4,9 +4,8 @@ import { once } from 'node:events';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 
-import { failAndStopGroup, localLauncher, parseListening } from './helpers.mjs';
+import { failAndStopGroup, linesWithin, localLauncher, parseListening } from './helpers.mjs';
 
 // `vp dev` runs Vite in the launcher process, so each Node.js option, preload,
 // and IPC channel of the launcher applies to Vite once, as when Vite runs directly.
@@ -82,8 +81,9 @@ const settings = [
   },
 ];
 
-async function vitePid(stdout) {
-  for await (const line of createInterface({ input: stdout })) {
+async function vitePid(stdout, seen) {
+  for await (const line of linesWithin(stdout)) {
+    seen.push(line);
     const listener = parseListening(line);
     if (listener) {
       return listener.pid;
@@ -110,8 +110,9 @@ async function run(setting) {
   child.stderr.on('data', (chunk) => (stderr += chunk));
   const messages = [];
   child.on('message', (message) => messages.push(message));
+  const stdout = [];
   try {
-    const pid = await vitePid(child.stdout);
+    const pid = await vitePid(child.stdout, stdout);
     assert.equal(pid, child.pid, 'Vite runs in the launcher process');
     process.kill(pid, 'SIGTERM');
     // `close` waits for the output that exit hooks write.
@@ -120,7 +121,10 @@ async function run(setting) {
     setting.check({ dir, pid, stderr, messages });
     console.log(`${setting.name}: applied once, to Vite in the launch PID`);
   } catch (error) {
-    throw new Error(`${setting.name} failed. Launcher stderr:\n${stderr}`, { cause: error });
+    throw new Error(
+      `${setting.name} failed.\nLauncher stdout:\n${stdout.join('\n')}\nLauncher stderr:\n${stderr}`,
+      { cause: error },
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
